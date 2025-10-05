@@ -1371,7 +1371,7 @@ generate_ups_widget() {
 				}
 
 				// If objValue is null or empty, return N/A
-				if (!objValue || Object.keys(objValue).length === 0) {
+				if (!value || !objValue || Object.keys(objValue).length === 0) {
 					return '<div style="text-align: right;"><span style="color: white;">N/A</span></div>';
 				}
 
@@ -1411,7 +1411,7 @@ generate_ups_widget() {
 
 				// Extract key UPS information
 				const batteryCharge = objValue['battery.charge'];
-				const batteryRuntime = objValue['battery.runtime'];
+				let batteryRuntime = objValue['battery.runtime'];
 				const inputVoltage = objValue['input.voltage'];
 				const upsLoad = objValue['ups.load'];
 				const upsStatus = objValue['ups.status'];
@@ -1421,6 +1421,34 @@ generate_ups_widget() {
 				const batteryRuntimeLow = objValue['battery.runtime.low'];
 				const upsRealPowerNominal = objValue['ups.realpower.nominal'];
 				const batteryMfrDate = objValue['battery.mfr.date'];
+				// Get battery capacity and voltage for estimation
+				const batteryAh = objValue['battery.capacity'] ? parseFloat(objValue['battery.capacity']) : null;
+				const batteryVoltage = objValue['battery.voltage'] ? parseFloat(objValue['battery.voltage']) : null;
+				// Get UPS efficiency if available, for more accurate runtime estimation
+				const upsEfficiency = objValue['ups.efficiency'] ? parseFloat(objValue['ups.efficiency']) : null;
+
+				let isRuntimeEstimated = false;
+
+				// Calculate estimated runtime if not provided
+				if (!batteryRuntime && batteryAh && batteryVoltage && upsLoad && upsRealPowerNominal && batteryCharge) {
+					const load = parseFloat(upsLoad);
+					const nominal = parseFloat(upsRealPowerNominal);
+					const charge = parseFloat(batteryCharge);
+
+					if (!isNaN(load) && !isNaN(nominal) && !isNaN(charge) && load > 0 && nominal > 0) {
+						// Calculate total energy capacity of the battery in Watt-hours
+						const batteryWattHours = batteryAh * batteryVoltage;
+						// Use reported efficiency if available, otherwise assume 85%
+						const inverterEfficiency = (upsEfficiency && !isNaN(upsEfficiency)) ? upsEfficiency / 100 : 0.85;
+						// Calculate current power draw in Watts
+						const currentPowerDraw = (load / 100) * nominal;
+						// Calculate runtime in hours at full charge
+						const runtimeHours = (batteryWattHours * inverterEfficiency) / currentPowerDraw;
+						// Convert to seconds and adjust for current battery charge percentage
+						batteryRuntime = Math.floor(runtimeHours * 3600 * (charge / 100));
+						isRuntimeEstimated = true;
+					}
+				}
 
 				// Build the status display
 				let displayItems = [];
@@ -1489,7 +1517,8 @@ generate_ups_widget() {
 					if (runtime <= runtimeLowThreshold / 2) runtimeColor = '#d9534f'; // Red if less than half of low threshold
 					else if (runtime <= runtimeLowThreshold) runtimeColor = '#f0ad4e'; // Orange if at low threshold
 
-					statusLine += `Runtime: <span style="color: ${runtimeColor};">${formatRuntime(runtime)}</span>`;
+					// Add tilde directly to the runtime string to indicate it's an estimate
+					statusLine += `Runtime: <span style="color: ${runtimeColor};">${formatRuntime(runtime)}${isRuntimeEstimated ? '~' : ''}</span>`;
 				} else {
 					statusLine += `Runtime: <span style="color: white;">N/A</span>`;
 				}
